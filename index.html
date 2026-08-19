@@ -686,7 +686,7 @@
                 <div class="search-section">
                     <div class="search-box">
                         <input type="text" id="searchInput" placeholder="🔍 ค้นหา Tracking Number (เช่น PPP18-12-25)">
-                        <button class="btn btn-primary" onclick="searchTracking()">ค้นหา</button>
+                        <button class="btn btn-primary" onclick="applyFilters()">ค้นหา</button>
                         <button class="btn btn-secondary" onclick="showAll()">แสดงทั้งหมด</button>
                     </div>
                 </div>
@@ -720,14 +720,14 @@
                     <table id="dataTable" style="display: none;">
                         <thead>
                             <tr>
-                                <th>วันที่สั่งซื้อ<br><select id="filterDate" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>Tracking<br><select id="filterTracking" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>ชื่อสินค้า<br><select id="filterProduct" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>จำนวน<br><select id="filterQty" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>หน่วย<br><select id="filterUnit" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>วันที่จัดส่ง<br><select id="filterDeliveryDate" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>สถานะ<br><select id="filterStatus" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
-                                <th>หมายเหตุ<br><select id="filterRemark" onchange="filterTable()"><option value="">ทั้งหมด</option></select></th>
+                                <th>วันที่สั่งซื้อ<br><select id="filterDate" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>Tracking<br><select id="filterTracking" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>ชื่อสินค้า<br><select id="filterProduct" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>จำนวน<br><select id="filterQty" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>หน่วย<br><select id="filterUnit" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>วันที่จัดส่ง<br><select id="filterDeliveryDate" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>สถานะ<br><select id="filterStatus" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
+                                <th>หมายเหตุ<br><select id="filterRemark" onchange="applyFilters()"><option value="">ทั้งหมด</option></select></th>
                             </tr>
                         </thead>
                         <tbody id="tableBody"></tbody>
@@ -766,7 +766,7 @@
                 <div class="search-section">
                     <div class="search-box">
                         <input type="text" id="archiveSearchInput" placeholder="🔍 ค้นหาข้อมูลย้อนหลัง">
-                        <button class="btn btn-primary" onclick="searchArchive()">ค้นหา</button>
+                        <button class="btn btn-primary" onclick="applyArchiveFilters()">ค้นหา</button>
                         <button class="btn btn-secondary" onclick="showAllArchive()">แสดงทั้งหมด</button>
                     </div>
                 </div>
@@ -875,17 +875,17 @@
                     document.getElementById('updateIndicator').classList.add('show');
                 }
 
-                const cacheBuster = Math.floor(new Date().getTime() / 30000);
-                const response = await fetch(SHEET_URL + '&timestamp=' + cacheBuster);
+                const cacheBuster = new Date().getTime();
+                const response = await fetch(SHEET_URL + '&t=' + cacheBuster);
                 const csvText = await response.text();
                 
                 if (csvText.trim().toLowerCase().startsWith('<!doctype') || csvText.toLowerCase().includes('<html')) {
-                    throw new Error('Google Sheets Rate Limit (รอสักครู่แล้วลองใหม่)');
+                    throw new Error('GoogleSheets HTML Error');
                 }
                 
                 const rows = parseCSV(csvText);
 
-                allData = rows.slice(1)
+                let tempAllData = rows.slice(1)
                     .map(row => {
                         let tDate = row.length > 19 ? row[19] : '';
                         let bDate = row.length > 1 ? row[1] : '';
@@ -904,6 +904,12 @@
                     })
                     .filter(item => item.tracking && item.tracking.trim() !== '');
 
+                if (tempAllData.length === 0 && allData.length > 0) {
+                    throw new Error('Empty Data Anomaly');
+                }
+
+                allData = tempAllData;
+
                 if (allData.length > 0) {
                     const {recent, archive} = splitDataByDate(allData);
                     filteredData = recent;
@@ -912,17 +918,8 @@
                     populateDropdowns(filteredData);
                     showDashboard(currentDashboardPeriod);
 
-                    if (document.getElementById('searchInput').value.trim() !== '') {
-                        searchTracking();
-                    } else {
-                        filterTable();
-                    }
-
-                    if (document.getElementById('archiveSearchInput').value.trim() !== '') {
-                        searchArchive();
-                    } else {
-                        updateArchiveDisplay();
-                    }
+                    applyFilters();
+                    applyArchiveFilters();
                 }
 
                 document.getElementById('loading').style.display = 'none';
@@ -935,8 +932,6 @@
                 }
 
             } catch (error) {
-                console.error('Error:', error);
-                
                 if (allData.length === 0) {
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('error').style.display = 'block';
@@ -1077,33 +1072,14 @@
             });
         }
 
-        function updateStats(data) {
-            const total = data.length;
-            let process = 0, completed = 0, rejected = 0, pickup = 0;
-
-            data.forEach(item => {
-                const type = getStatusType(item.statusRaw);
-                if (type === 'completed') completed++;
-                else if (type === 'rejected') rejected++;
-                else if (type === 'pickup') pickup++;
-                else process++;
-            });
-
-            document.getElementById('totalOrders').textContent = total;
-            document.getElementById('processOrders').textContent = process;
-            document.getElementById('completedOrders').textContent = completed;
-            document.getElementById('pickupOrders').textContent = pickup;
-            document.getElementById('rejectedOrders').textContent = rejected;
-        }
-
-        function updateArchiveDisplay() {
+        function displayArchiveData(data) {
             const tbody = document.getElementById('archiveTableBody');
             tbody.innerHTML = '';
 
-            document.getElementById('archiveTotalOrders').textContent = archiveData.length;
-            document.getElementById('archiveCompletedOrders').textContent = archiveData.length;
+            document.getElementById('archiveTotalOrders').textContent = data.length;
+            document.getElementById('archiveCompletedOrders').textContent = data.length;
 
-            if (archiveData.length === 0) {
+            if (data.length === 0) {
                 document.getElementById('archiveTable').style.display = 'none';
                 document.getElementById('archiveNoData').style.display = 'block';
                 return;
@@ -1112,7 +1088,7 @@
             document.getElementById('archiveTable').style.display = 'table';
             document.getElementById('archiveNoData').style.display = 'none';
 
-            archiveData.forEach(item => {
+            data.forEach(item => {
                 const row = tbody.insertRow();
                 let rawStat = item.statusRaw ? item.statusRaw.trim() : 'PO ISSUED';
                 let status = formatStatus(rawStat);
@@ -1134,6 +1110,25 @@
                     <td>${item.remark}</td>
                 `;
             });
+        }
+
+        function updateStats(data) {
+            const total = data.length;
+            let process = 0, completed = 0, rejected = 0, pickup = 0;
+
+            data.forEach(item => {
+                const type = getStatusType(item.statusRaw);
+                if (type === 'completed') completed++;
+                else if (type === 'rejected') rejected++;
+                else if (type === 'pickup') pickup++;
+                else process++;
+            });
+
+            document.getElementById('totalOrders').textContent = total;
+            document.getElementById('processOrders').textContent = process;
+            document.getElementById('completedOrders').textContent = completed;
+            document.getElementById('pickupOrders').textContent = pickup;
+            document.getElementById('rejectedOrders').textContent = rejected;
         }
 
         function showDashboard(period) {
@@ -1279,70 +1274,47 @@
             return seg;
         }
 
-        function searchTracking() {
+        function applyFilters() {
             const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
-            
-            if (searchTerm === '') {
-                showAll();
-                return;
-            }
+            const fDate = document.getElementById('filterDate').value;
+            const fTracking = document.getElementById('filterTracking').value;
+            const fProduct = document.getElementById('filterProduct').value;
+            const fQty = document.getElementById('filterQty').value;
+            const fUnit = document.getElementById('filterUnit').value;
+            const fDeliveryDate = document.getElementById('filterDeliveryDate').value;
+            const fStatus = document.getElementById('filterStatus').value;
+            const fRemark = document.getElementById('filterRemark').value;
 
-            const results = filteredData.filter(item => 
-                item.tracking.toLowerCase().includes(searchTerm) ||
-                item.productName.toLowerCase().includes(searchTerm)
-            );
+            const results = filteredData.filter(item => {
+                const status = formatStatus(item.statusRaw);
+                const matchesSearch = searchTerm === '' || 
+                                      item.tracking.toLowerCase().includes(searchTerm) || 
+                                      item.productName.toLowerCase().includes(searchTerm);
+                
+                const matchesDropdowns = (fDate === '' || item.date === fDate) &&
+                                         (fTracking === '' || item.tracking === fTracking) &&
+                                         (fProduct === '' || item.productName === fProduct) &&
+                                         (fQty === '' || item.quantity.toString() === fQty) &&
+                                         (fUnit === '' || item.unit === fUnit) &&
+                                         (fDeliveryDate === '' || item.deliveryDate === fDeliveryDate) &&
+                                         (fStatus === '' || status === fStatus) &&
+                                         (fRemark === '' || item.remark === fRemark);
+
+                return matchesSearch && matchesDropdowns;
+            });
 
             displayData(results);
             updateStats(results);
         }
 
-        function searchArchive() {
+        function applyArchiveFilters() {
             const searchTerm = document.getElementById('archiveSearchInput').value.trim().toLowerCase();
-            
-            if (searchTerm === '') {
-                updateArchiveDisplay();
-                return;
-            }
-
-            const tbody = document.getElementById('archiveTableBody');
-            tbody.innerHTML = '';
-
             const results = archiveData.filter(item => 
+                searchTerm === '' ||
                 item.tracking.toLowerCase().includes(searchTerm) ||
                 item.productName.toLowerCase().includes(searchTerm)
             );
-
-            if (results.length === 0) {
-                document.getElementById('archiveTable').style.display = 'none';
-                document.getElementById('archiveNoData').style.display = 'block';
-                return;
-            }
-
-            document.getElementById('archiveTable').style.display = 'table';
-            document.getElementById('archiveNoData').style.display = 'none';
-
-            results.forEach(item => {
-                const row = tbody.insertRow();
-                let rawStat = item.statusRaw ? item.statusRaw.trim() : 'PO ISSUED';
-                let status = formatStatus(rawStat);
-                const type = getStatusType(rawStat);
-                
-                let statusClass = 'status-process';
-                if (type === 'completed') statusClass = 'status-completed';
-                else if (type === 'rejected') statusClass = 'status-rejected';
-                else if (type === 'pickup') statusClass = 'status-pickup';
-
-                row.innerHTML = `
-                    <td>${formatDateDisplay(item.date)}</td>
-                    <td><strong>${item.tracking}</strong></td>
-                    <td>${item.productName}</td>
-                    <td>${item.quantity}</td>
-                    <td>${item.unit}</td>
-                    <td>${item.deliveryDate}</td>
-                    <td><span class="status-badge ${statusClass}">${status}</span></td>
-                    <td>${item.remark}</td>
-                `;
-            });
+            displayArchiveData(results);
         }
 
         function showAll() {
@@ -1354,13 +1326,12 @@
                 if(el) el.value = '';
             });
             
-            displayData(filteredData);
-            updateStats(filteredData);
+            applyFilters();
         }
 
         function showAllArchive() {
             document.getElementById('archiveSearchInput').value = '';
-            updateArchiveDisplay();
+            applyArchiveFilters();
         }
 
         function populateDropdowns(data) {
@@ -1404,33 +1375,6 @@
             setupDropdown(data, 'statusRaw', 'filterStatus');
         }
 
-        function filterTable() {
-            const fDate = document.getElementById('filterDate').value;
-            const fTracking = document.getElementById('filterTracking').value;
-            const fProduct = document.getElementById('filterProduct').value;
-            const fQty = document.getElementById('filterQty').value;
-            const fUnit = document.getElementById('filterUnit').value;
-            const fDeliveryDate = document.getElementById('filterDeliveryDate').value;
-            const fStatus = document.getElementById('filterStatus').value;
-            const fRemark = document.getElementById('filterRemark').value;
-
-            const results = filteredData.filter(item => {
-                const status = formatStatus(item.statusRaw);
-                
-                return (fDate === '' || item.date === fDate) &&
-                       (fTracking === '' || item.tracking === fTracking) &&
-                       (fProduct === '' || item.productName === fProduct) &&
-                       (fQty === '' || item.quantity.toString() === fQty) &&
-                       (fUnit === '' || item.unit === fUnit) &&
-                       (fDeliveryDate === '' || item.deliveryDate === fDeliveryDate) &&
-                       (fStatus === '' || status === fStatus) &&
-                       (fRemark === '' || item.remark === fRemark);
-            });
-
-            displayData(results);
-            updateStats(results);
-        }
-
         function switchTab(tab) {
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -1449,11 +1393,11 @@
         }
 
         document.getElementById('searchInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') searchTracking();
+            if (e.key === 'Enter') applyFilters();
         });
 
         document.getElementById('archiveSearchInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') searchArchive();
+            if (e.key === 'Enter') applyArchiveFilters();
         });
 
         loadData(false);
